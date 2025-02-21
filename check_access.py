@@ -2,9 +2,9 @@ import os
 
 def check_access():
     paths = [
-        'C:/data/train',
-        'C:/data/val',
-        'C:/data/test'
+        './data/train',
+        './data/val',
+        './data/test'
     ]
     
     print("Checking directory access...")

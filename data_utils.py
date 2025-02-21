@@ -95,9 +95,13 @@ class WildfireDataset(Dataset):
             input_tensors = []
             for key in input_keys:
                 feature_data = features[key]  # Already in the correct format from _parse_tfrecord
-                # Reshape to 64x64 if needed
+                # Reshape to 64x64 
                 feature_data = tf.reshape(feature_data, (64, 64))
-                input_tensors.append(torch.from_numpy(feature_data.numpy()).float())
+                # Convert to PyTorch tensor
+                feature_tensor = torch.from_numpy(feature_data.numpy()).float()
+                # Handle invalid values
+                feature_tensor = torch.nan_to_num(feature_tensor, 0.0)
+                input_tensors.append(feature_tensor)
             
             # Stack input features
             input_tensor = torch.stack(input_tensors)
@@ -105,6 +109,13 @@ class WildfireDataset(Dataset):
             # Process target (FireMask)
             target_data = tf.reshape(features['FireMask'], (64, 64))
             target_tensor = torch.from_numpy(target_data.numpy()).float()
+            
+            # Handle invalid values and clamp to [0, 1]
+            target_tensor = torch.nan_to_num(target_tensor, 0.0)
+            target_tensor = torch.clamp(target_tensor, 0.0, 1.0)
+            
+            # Add channel dimension
+            target_tensor = target_tensor.unsqueeze(0)
             
             return (input_tensor, target_tensor)
             
@@ -134,7 +145,7 @@ def create_dataloaders(
     os.makedirs(val_cache, exist_ok=True)
     
     # Create datasets
-    logging.info("Creating TensorFlow dataset...")
+    logging.info("Creating datasets...")
     train_dataset = WildfireDataset(train_path, cache_dir=train_cache)
     val_dataset = WildfireDataset(val_path, cache_dir=val_cache)
     

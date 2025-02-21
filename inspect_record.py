@@ -88,7 +88,7 @@ def test_parse_tfrecord(file_path, feature_description):
 
 if __name__ == "__main__":
     # Test with one TFRecord file
-    data_dir = "C:/data/train"
+    data_dir = "./data/train"
     tfrecord_files = [f for f in os.listdir(data_dir) if f.endswith('.tfrecord')]
     
     if not tfrecord_files:

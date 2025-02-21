@@ -3,14 +3,13 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from typing import Tuple, Dict, Optional
+from typing import Dict, Optional
 import logging
 import json
 from pathlib import Path
 import time
-from tqdm import tqdm
-import numpy as np
 from datetime import datetime
+from tqdm import tqdm
 
 from data_utils import create_dataloaders
 from model import UNet
@@ -96,13 +95,13 @@ class Trainer:
         
         # Setup logging and checkpointing
         self.setup_logging()
-        self.checkpoint_dir = Path(config.get('checkpoint_dir', 'checkpoints'))
+        self.checkpoint_dir = Path(config.get('checkpoint_dir', './checkpoints'))
         self.checkpoint_dir.mkdir(exist_ok=True)
     
     def setup_logging(self):
         """Setup logging configuration."""
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        log_dir = Path(self.config.get('log_dir', 'logs'))
+        log_dir = Path(self.config.get('log_dir', './logs'))
         log_dir.mkdir(exist_ok=True)
         
         logging.basicConfig(
@@ -275,9 +274,9 @@ class Trainer:
 def main():
     # Configuration
     config = {
-        'train_path': 'C:/data/train',
-        'val_path': 'C:/data/val',
-        'cache_dir': 'C:/data/cached_data',  # New cache directory
+        'train_path': './data/train',
+        'val_path': './data/val',
+        'cache_dir': './data/cached_data',
         'batch_size': 32,
         'num_workers': 4,
         'learning_rate': 1e-4,
@@ -288,8 +287,8 @@ def main():
         'max_grad_norm': 1.0,
         'n_channels': 11,
         'n_classes': 1,
-        'checkpoint_dir': 'checkpoints',
-        'log_dir': 'logs'
+        'checkpoint_dir': './checkpoints',
+        'log_dir': './logs'
     }
     
     try:
@@ -301,7 +300,7 @@ def main():
             print(f"CUDA is available. Using GPU: {torch.cuda.get_device_name(0)}")
             print(f"CUDA version: {torch.version.cuda}")
         else:
-            print("CUDA is not available. Checking why...")
+            print("CUDA is not available. Training will be slower.")
             print(f"PyTorch version: {torch.__version__}")
             
         # Create dataloaders
@@ -324,8 +323,7 @@ def main():
             model=model,
             train_loader=train_loader,
             val_loader=val_loader,
-            config=config,
-            checkpoint_path=None  # Set to checkpoint path to resume training
+            config=config
         )
         
         # Start training
