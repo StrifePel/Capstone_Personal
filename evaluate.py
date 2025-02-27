@@ -9,9 +9,11 @@ from sklearn.metrics import precision_recall_fscore_support, roc_auc_score
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import json
+import argparse
 
 from data_utils import WildfireDataset
 from model import UNet
+from config import config, get_active_features
 
 class Evaluator:
     def __init__(
@@ -19,12 +21,14 @@ class Evaluator:
         model: nn.Module,
         test_loader: DataLoader,
         device: torch.device,
-        thresholds: List[float] = None
+        thresholds: List[float] = None,
+        active_features: List[str] = None
     ):
         self.model = model
         self.test_loader = test_loader
         self.device = device
         self.thresholds = thresholds if thresholds is not None else [0.5]
+        self.active_features = active_features
         
         # Setup logging
         logging.basicConfig(
@@ -32,6 +36,9 @@ class Evaluator:
             format='%(asctime)s - %(levelname)s - %(message)s'
         )
         self.logger = logging.getLogger(__name__)
+        
+        if self.active_features:
+            self.logger.info(f"Evaluating with features: {', '.join(self.active_features)}")
         
     def calculate_metrics(
         self,
@@ -185,19 +192,54 @@ class Evaluator:
         # Plot metrics vs threshold
         self.plot_threshold_metrics(metrics, save_dir)
         
+        # Save feature configuration
+        if self.active_features:
+            with open(save_dir / 'features.json', 'w') as f:
+                json.dump({'active_features': self.active_features}, f, indent=2)
+        
         return metrics
 
 def main():
-    # Specify the path to your checkpoint
-    checkpoint_path = './checkpoints/best_model.pt'
+    parser = argparse.ArgumentParser(description='Evaluate wildfire prediction model')
+    parser.add_argument('--checkpoint', type=str, default='./checkpoints/best_model.pt',
+                        help='Path to model checkpoint')
+    parser.add_argument('--test_path', type=str, default='./data/test',
+                        help='Path to test data')
+    parser.add_argument('--output_dir', type=str, default='./evaluation_results',
+                        help='Directory to save evaluation results')
+    parser.add_argument('--thresholds', type=float, nargs='+', default=[0.1, 0.2, 0.3, 0.4, 0.5],
+                        help='Thresholds for evaluation')
+    parser.add_argument('--features', type=str, nargs='+', default=None,
+                        help='Specific features to use (overrides config)')
+    parser.add_argument('--batch_size', type=int, default=32,
+                        help='Batch size for evaluation')
+    parser.add_argument('--num_workers', type=int, default=4,
+                        help='Number of workers for data loading')
+    
+    args = parser.parse_args()
     
     # Define thresholds to test
-    thresholds = [0.1, 0.2, 0.3, 0.4, 0.5]
+    thresholds = args.thresholds
     
     # Load checkpoint
     try:
-        checkpoint = torch.load(checkpoint_path)
-        print(f"Loaded checkpoint from {checkpoint_path}")
+        checkpoint = torch.load(args.checkpoint)
+        print(f"Loaded checkpoint from {args.checkpoint}")
+        
+        # Get active features from checkpoint or argument
+        if args.features:
+            active_features = args.features
+            print(f"Using specified features: {active_features}")
+        elif 'active_features' in checkpoint:
+            active_features = checkpoint['active_features']
+            print(f"Using features from checkpoint: {active_features}")
+        else:
+            active_features = get_active_features()
+            print(f"Using features from config: {active_features}")
+            
+        # Determine number of channels
+        n_channels = len(active_features)
+            
     except Exception as e:
         print(f"Error loading checkpoint: {e}")
         return
@@ -209,15 +251,16 @@ def main():
     # Create test dataloader
     try:
         test_dataset = WildfireDataset(
-            tfrecord_path='./data/test',
-            cache_dir='./data/cached_data'
+            tfrecord_path=args.test_path,
+            cache_dir=config['cache_dir'],
+            active_features=active_features
         )
         
         test_loader = DataLoader(
             test_dataset,
-            batch_size=32,
+            batch_size=args.batch_size,
             shuffle=False,
-            num_workers=4,
+            num_workers=args.num_workers,
             pin_memory=torch.cuda.is_available()
         )
         print(f"Created test dataloader with {len(test_dataset)} samples")
@@ -227,8 +270,9 @@ def main():
     
     # Initialize model
     model = UNet(
-        n_channels=11,
-        n_classes=1
+        n_channels=n_channels,
+        n_classes=1,
+        feature_names=active_features
     )
     
     # Load model weights
@@ -241,13 +285,23 @@ def main():
         return
     
     # Initialize evaluator with multiple thresholds
-    evaluator = Evaluator(model, test_loader, device, thresholds=thresholds)
+    evaluator = Evaluator(
+        model, 
+        test_loader, 
+        device, 
+        thresholds=thresholds,
+        active_features=active_features
+    )
     print(f"Initialized evaluator with thresholds: {thresholds}")
     
     # Run evaluation
     try:
-        save_dir = Path('./evaluation_results')
-        save_dir.mkdir(exist_ok=True)
+        save_dir = Path(args.output_dir)
+        if active_features:
+            # Create a specific directory for this feature configuration
+            feature_hash = "_".join(sorted(active_features))
+            save_dir = save_dir / feature_hash
+        save_dir.mkdir(exist_ok=True, parents=True)
         print(f"Saving results to {save_dir}")
         
         metrics = evaluator.evaluate(save_dir)

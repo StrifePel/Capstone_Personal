@@ -9,8 +9,22 @@ config = {
     'test_path': './data/test',
     'cache_dir': './data/cached_data',
     
+    # Features configuration
+    'features': {
+        'NDVI': True,           # Normalized Difference Vegetation Index
+        'elevation': True,      # Elevation data
+        'population': True,     # Population density
+        'pdsi': True,           # Palmer Drought Severity Index
+        'vs': True,             # Wind speed
+        'pr': True,             # Precipitation
+        'sph': True,            # Specific humidity
+        'tmmx': True,           # Maximum temperature
+        'th': True,             # Wind direction
+        'tmmn': True,           # Minimum temperature
+        'erc': True,            # Energy Release Component (fire danger)
+    },
+    
     # Model parameters
-    'n_channels': 11,  # NDVI, elevation, population, pdsi, vs, pr, sph, tmmx, th, tmmn, erc
     'n_classes': 1,    # FireMask
     
     # Training parameters
@@ -28,3 +42,16 @@ config = {
     'log_dir': './logs',
     'evaluation_dir': './evaluation_results'
 }
+
+# Calculate number of active channels based on feature selection
+def get_active_features():
+    """Get list of active feature names."""
+    return [feat for feat, is_active in config['features'].items() if is_active]
+
+def get_n_channels():
+    """Get number of active channels."""
+    return sum(1 for feat, is_active in config['features'].items() if is_active)
+
+# Set the number of channels dynamically
+config['n_channels'] = get_n_channels()
+config['active_features'] = get_active_features()

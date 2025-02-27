@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import List, Dict, Optional
 
 class DoubleConv(nn.Module):
     """Double convolution block for U-Net."""
@@ -20,10 +21,17 @@ class DoubleConv(nn.Module):
 
 class UNet(nn.Module):
     """U-Net architecture for wildfire spread prediction."""
-    def __init__(self, n_channels: int, n_classes: int):
+    def __init__(self, n_channels: int, n_classes: int, feature_names: Optional[List[str]] = None):
         super().__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
+        self.feature_names = feature_names  # Store feature names for reference
+        
+        # Log feature configuration
+        if feature_names:
+            print(f"Model initialized with {n_channels} channels: {', '.join(feature_names)}")
+        else:
+            print(f"Model initialized with {n_channels} channels")
 
         # Encoder
         self.inc = DoubleConv(n_channels, 64)
@@ -96,3 +104,49 @@ class UNet(nn.Module):
         # Output layer
         logits = self.outc(x)
         return torch.sigmoid(logits)
+        
+class FeatureImportanceAnalyzer:
+    """Analyze and report feature importance for the wildfire model."""
+    def __init__(self, model: nn.Module, feature_names: List[str]):
+        self.model = model
+        self.feature_names = feature_names
+        
+    def analyze_gradient_based_importance(self, data_loader, device):
+        """Analyze feature importance based on gradient magnitudes."""
+        self.model.eval()
+        feature_grads = {name: 0.0 for name in self.feature_names}
+        samples_count = 0
+        
+        for inputs, targets in data_loader:
+            inputs = inputs.to(device)
+            inputs.requires_grad = True
+            targets = targets.to(device)
+            
+            # Forward pass
+            outputs = self.model(inputs)
+            loss = F.binary_cross_entropy(outputs, targets)
+            
+            # Backward pass
+            self.model.zero_grad()
+            loss.backward()
+            
+            # Calculate gradient magnitudes for each feature channel
+            for i, name in enumerate(self.feature_names):
+                # Take absolute mean of gradients for this feature channel
+                grad_mag = inputs.grad[:, i].abs().mean().item()
+                feature_grads[name] += grad_mag
+            
+            samples_count += 1
+            
+            # Limit analysis to first 100 batches
+            if samples_count >= 100:
+                break
+                
+        # Normalize by number of samples
+        for name in feature_grads:
+            feature_grads[name] /= samples_count
+            
+        # Sort features by importance
+        sorted_features = sorted(feature_grads.items(), key=lambda x: x[1], reverse=True)
+        
+        return sorted_features

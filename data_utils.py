@@ -1,7 +1,7 @@
 import os
 import torch
 from torch.utils.data import Dataset, DataLoader
-from typing import Tuple
+from typing import Tuple, List, Dict
 import tensorflow as tf
 import logging
 from pathlib import Path
@@ -9,13 +9,27 @@ import numpy as np
 
 class WildfireDataset(Dataset):
     """PyTorch Dataset for wildfire spread prediction with PT file caching."""
-    def __init__(self, tfrecord_path: str, cache_dir: str = "cached_data"):
+    def __init__(self, tfrecord_path: str, cache_dir: str = "cached_data", active_features: List[str] = None):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(exist_ok=True)
+        
+        # All available features
+        self.all_features = [
+            'NDVI', 'elevation', 'population', 'pdsi', 
+            'vs', 'pr', 'sph', 'tmmx', 'th', 'tmmn', 'erc'
+        ]
+        
+        # Active features to use
+        self.active_features = active_features if active_features else self.all_features
+        self.feature_indices = {feat: i for i, feat in enumerate(self.all_features)}
+        
+        # Generate a unique cache identifier based on active features
+        self.feature_hash = "_".join(sorted(self.active_features))
         
         # Setup logging
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
+        self.logger.info(f"Active features: {self.active_features}")
         
         # Get all TFRecord filenames
         if os.path.isdir(tfrecord_path):
@@ -31,7 +45,8 @@ class WildfireDataset(Dataset):
         # Convert and cache each TFRecord file
         for tfrecord_file in self.tfrecord_files:
             self.logger.info(f"Found TFRecord file: {tfrecord_file}")
-            pt_file = self.cache_dir / f"{Path(tfrecord_file).stem}.pt"
+            # Include feature selection in cache filename
+            pt_file = self.cache_dir / f"{Path(tfrecord_file).stem}_{self.feature_hash}.pt"
             
             if pt_file.exists():
                 self.logger.info(f"Loading cached PT file: {pt_file}")
@@ -84,24 +99,22 @@ class WildfireDataset(Dataset):
         return tf.io.parse_single_example(example_proto, feature_description)
     
     def _process_features(self, features):
-        """Convert TF features to PyTorch tensors."""
+        """Convert TF features to PyTorch tensors using only active features."""
         try:
-            # Process input features
-            input_keys = [
-                'NDVI', 'elevation', 'population', 'pdsi', 
-                'vs', 'pr', 'sph', 'tmmx', 'th', 'tmmn', 'erc'
-            ]
-            
+            # Process only active input features
             input_tensors = []
-            for key in input_keys:
-                feature_data = features[key]  # Already in the correct format from _parse_tfrecord
-                # Reshape to 64x64 
-                feature_data = tf.reshape(feature_data, (64, 64))
-                # Convert to PyTorch tensor
-                feature_tensor = torch.from_numpy(feature_data.numpy()).float()
-                # Handle invalid values
-                feature_tensor = torch.nan_to_num(feature_tensor, 0.0)
-                input_tensors.append(feature_tensor)
+            for key in self.active_features:
+                if key in features:
+                    feature_data = features[key]
+                    # Reshape to 64x64 
+                    feature_data = tf.reshape(feature_data, (64, 64))
+                    # Convert to PyTorch tensor
+                    feature_tensor = torch.from_numpy(feature_data.numpy()).float()
+                    # Handle invalid values
+                    feature_tensor = torch.nan_to_num(feature_tensor, 0.0)
+                    input_tensors.append(feature_tensor)
+                else:
+                    self.logger.warning(f"Feature {key} not found in TFRecord")
             
             # Stack input features
             input_tensor = torch.stack(input_tensors)
@@ -134,7 +147,8 @@ def create_dataloaders(
     val_path: str,
     batch_size: int = 32,
     num_workers: int = 4,
-    cache_dir: str = "cached_data"
+    cache_dir: str = "cached_data",
+    active_features: List[str] = None
 ) -> Tuple[DataLoader, DataLoader]:
     """Create train and validation dataloaders with caching."""
     
@@ -146,8 +160,8 @@ def create_dataloaders(
     
     # Create datasets
     logging.info("Creating datasets...")
-    train_dataset = WildfireDataset(train_path, cache_dir=train_cache)
-    val_dataset = WildfireDataset(val_path, cache_dir=val_cache)
+    train_dataset = WildfireDataset(train_path, cache_dir=train_cache, active_features=active_features)
+    val_dataset = WildfireDataset(val_path, cache_dir=val_cache, active_features=active_features)
     
     # Create dataloaders
     train_loader = DataLoader(
